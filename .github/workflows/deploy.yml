@@ -3,11 +3,9 @@ name: Deploy to GitHub Pages
 on:
   workflow_dispatch:  # Manual trigger only
 
-# Add permissions here
 permissions:
-  contents: read
+  contents: write
   pages: write
-  id-token: write
 
 jobs:
   build-and-deploy:
@@ -15,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       
       - name: Setup Node
         uses: actions/setup-node@v3
@@ -30,5 +30,6 @@ jobs:
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          personal_token: ${{ secrets.PAT_TOKEN }}
           publish_dir: ./dist
+          force_orphan: true
