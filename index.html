@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Reactive Game</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: Arial, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    #upload-container {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    #upload-container.hidden {
+      display: none;
+    }
+    
+    h1 {
+      margin-bottom: 20px;
+      font-size: 2em;
+    }
+    
+    .upload-area {
+      border: 2px dashed #4a9eff;
+      padding: 40px;
+      border-radius: 10px;
+      background: #2a2a2a;
+      margin-bottom: 20px;
+    }
+    
+    input[type="file"] {
+      display: none;
+    }
+    
+    .upload-btn {
+      background: #4a9eff;
+      color: white;
+      padding: 12px 30px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background 0.3s;
+    }
+    
+    .upload-btn:hover {
+      background: #3a8eef;
+    }
+    
+    #status {
+      margin-top: 20px;
+      font-size: 14px;
+      color: #4a9eff;
+    }
+    
+    #game-container {
+      display: none;
+    }
+    
+    #game-container.visible {
+      display: block;
+    }
+    
+    #instructions {
+      margin-bottom: 20px;
+      text-align: center;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      max-width: 800px;
+    }
+    
+    #instructions p {
+      margin: 5px 0;
+      color: #ccc;
+    }
+    
+    canvas {
+      border: 2px solid #4a9eff;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="upload-container">
+    <h1>Audio Reactive Game</h1>
+    <div class="upload-area">
+      <p style="margin-bottom: 15px;">Upload an audio file to generate terrain</p>
+      <input type="file" id="audio-upload" accept="audio/*">
+      <label for="audio-upload" class="upload-btn">Choose Audio File</label>
+    </div>
+    <div id="status"></div>
+  </div>
+  
+  <div id="game-container">
+    <div id="instructions">
+      <p><strong>Instructions:</strong></p>
+      <p>Sing musical notes (DO, RE, MI, FA, SOL, LA, SI) to switch lanes</p>
+      <p>Avoid the RED obstacles in each lane!</p>
+      <p>Click "Allow" when prompted for microphone access, then click Start Game</p>
+      <p style="font-size: 11px; margin-top: 10px;">Note: DO = lowest lane, SI = highest lane</p>
+    </div>
+    <button id="start-btn" class="upload-btn" style="margin-bottom: 20px; display: none;">Start Game</button>
+    <button id="restart-btn" class="upload-btn" style="margin-bottom: 20px; display: none; background: #ff6b00;">Restart Game</button>
+    <div id="game"></div>
+  </div>
+  
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
+
