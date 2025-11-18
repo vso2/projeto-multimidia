@@ -1,3 +1,37 @@
+# Current entries
 node_modules/
 dist/
 
+# Python virtual environment (IMPORTANT - this is huge!)
+tools/venv/
+venv/
+env/
+ENV/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE/Editor files (optional but recommended)
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables (if you add any)
+.env
+.env.local
+
+# Build artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Optional: Temporary files
+*.tmp
+*.temp

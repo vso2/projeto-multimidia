@@ -1,18 +1,19 @@
 export default class TerrainGenerator {
-  constructor(scene, frequencyData) {
+  constructor(scene, stageConfig) {
     this.scene = scene;
-    this.frequencyData = frequencyData;
+    this.stageConfig = stageConfig;
     this.obstacles = [];
     this.laneLines = [];
-    this.segmentWidth = 60; // Width of each time segment
-    this.numLanes = 7; // DO, RE, MI, FA, SOL, LA, SI
+    this.graphics = null;
+    this.laneLabels = [];
+    this.numLanes = 7; // 7 lanes for force levels (0-6)
     
     // Calculate lane positions
     const gameHeight = scene.game.config.height;
     this.laneHeight = 70;
     this.topMargin = 50;
     
-    // Lane Y positions (top to bottom: SI, LA, SOL, FA, MI, RE, DO)
+    // Lane Y positions (top to bottom: lanes 6, 5, 4, 3, 2, 1, 0)
     this.laneYPositions = [];
     for (let i = 0; i < this.numLanes; i++) {
       this.laneYPositions.push(this.topMargin + (i * this.laneHeight));
@@ -23,26 +24,27 @@ export default class TerrainGenerator {
     // Draw lane dividers
     this.drawLanes();
     
-    // Generate obstacles based on frequency data
-    this.generateObstacles();
+    // Generate pillar obstacles from stage configuration
+    this.generatePillars();
     
     return this.obstacles;
   }
   
   drawLanes() {
-    const graphics = this.scene.add.graphics();
-    graphics.lineStyle(1, 0x444444, 0.5);
+    this.graphics = this.scene.add.graphics();
+    this.graphics.lineStyle(1, 0x444444, 0.5);
+    this.graphics.setScrollFactor(0); // Keep lane lines fixed on screen
     
-    const totalWidth = this.frequencyData.length * this.segmentWidth;
+    const screenWidth = this.scene.game.config.width;
     
     // Draw horizontal lane lines
     this.laneYPositions.forEach((y, index) => {
-      graphics.moveTo(0, y);
-      graphics.lineTo(totalWidth, y);
+      this.graphics.moveTo(0, y);
+      this.graphics.lineTo(screenWidth, y);
       
-      // Add lane labels centered on the lane
-      const noteNames = ['SI', 'LA', 'SOL', 'FA', 'MI', 'RE', 'DO'];
-      const label = this.scene.add.text(5, y, noteNames[index], {
+      // Add lane labels (6 = highest force, 0 = lowest force)
+      const laneNumber = this.numLanes - index - 1; // Reverse: top lane = 6, bottom = 0
+      const label = this.scene.add.text(5, y, `${laneNumber}`, {
         fontSize: '14px',
         fill: '#ffff00',
         fontStyle: 'bold',
@@ -50,157 +52,62 @@ export default class TerrainGenerator {
       });
       label.setOrigin(0, 0.5); // Left aligned, vertically centered on lane
       label.setScrollFactor(0); // Keep labels fixed on screen
+      label.setDepth(100); // Keep labels above other elements
+      this.laneLabels.push(label);
     });
     
-    graphics.strokePath();
+    this.graphics.strokePath();
   }
   
-  generateObstacles() {
-    // Analyze frequency data to place obstacles in lanes
-    let maxFreq = 0;
-    let minFreq = Infinity;
-    
-    // First pass: find min/max for global normalization
-    this.frequencyData.forEach(freq => {
-      if (freq > maxFreq) maxFreq = freq;
-      if (freq < minFreq) minFreq = freq;
+  generatePillars() {
+    // Create pillar obstacles from stage configuration
+    this.stageConfig.pillars.forEach(pillarConfig => {
+      this.createPillar(pillarConfig.x, pillarConfig.blockedLanes, pillarConfig.width);
     });
     
-    const freqRange = maxFreq - minFreq;
-    console.log(`Frequency range: min=${minFreq.toFixed(2)}, max=${maxFreq.toFixed(2)}, range=${freqRange.toFixed(2)}`);
-    
-    // Calculate average frequency for better distribution
-    const avgFreq = this.frequencyData.reduce((a, b) => a + b, 0) / this.frequencyData.length;
-    
-    // Create obstacles at regular intervals to ensure distribution throughout
-    const obstacleInterval = 15; // Create obstacle every N segments (increased spacing)
-    const minObstacleDistance = 200; // Minimum distance between obstacles in pixels
-    let lastObstacleX = -minObstacleDistance; // Track last obstacle position
-    
-    this.frequencyData.forEach((frequency, index) => {
-      const x = index * this.segmentWidth;
-      
-      // Normalize frequency globally to determine which lanes get obstacles
-      const globalNormalized = freqRange > 0 ? (frequency - minFreq) / freqRange : 0.5;
-      
-      // Map frequency to lanes (0-6)
-      // Higher frequency = higher lanes (SI, LA, SOL)
-      // Lower frequency = lower lanes (DO, RE, MI)
-      const primaryLane = Math.floor(globalNormalized * (this.numLanes - 1));
-      
-      // Check minimum distance from last obstacle
-      const isFarEnough = (x - lastObstacleX) >= minObstacleDistance;
-      
-      // Create obstacle if:
-      // 1. It's a significant peak (using shouldCreateObstacle), OR
-      // 2. It's at a regular interval (guaranteed obstacles throughout)
-      // AND it's far enough from the last obstacle
-      // Note: Removed "above average" condition to reduce density
-      const isInterval = index % obstacleInterval === 0;
-      const isPeak = this.shouldCreateObstacle(frequency, index);
-      
-      // Create obstacle if condition is met AND it's far enough
-      const shouldCreate = (isPeak || isInterval) && isFarEnough;
-      
-      if (shouldCreate) {
-        // Create obstacle in the determined lane
-        this.createObstacle(x, primaryLane);
-        lastObstacleX = x; // Update last obstacle position
-        
-        // Rarely create obstacles in adjacent lanes for very strong peaks (deterministic)
-        // Use frequency value to determine direction deterministically
-        const normalizedFreq = globalNormalized;
-        // Only add adjacent obstacle for very strong peaks (top 15% of range)
-        if (normalizedFreq > 0.85 && isPeak && (frequency % 10) > 7) {
-          // Use frequency as deterministic seed for direction
-          const direction = (Math.floor(frequency) % 2 === 0) ? 1 : -1;
-          const adjacentLane = primaryLane + direction;
-          
-          // Only add adjacent obstacle if it's a valid lane
-          if (adjacentLane >= 0 && adjacentLane < this.numLanes) {
-            this.createObstacle(x, adjacentLane);
-          }
-        }
-      }
-    });
-    
-    console.log(`Generated ${this.obstacles.length} obstacles across ${this.numLanes} lanes`);
-    
-    // If no obstacles were created, create some default ones
-    if (this.obstacles.length === 0) {
-      console.warn('No obstacles generated! Creating default obstacles...');
-      for (let i = 0; i < this.frequencyData.length; i += 10) {
-        const x = i * this.segmentWidth;
-        const lane = Math.floor((i / this.frequencyData.length) * this.numLanes);
-        this.createObstacle(x, lane);
-      }
-    }
+    console.log(`Generated ${this.obstacles.length} pillar obstacles for stage: ${this.stageConfig.name}`);
   }
   
-  normalizeFrequency(frequency, index) {
-    // Get local context for better normalization
-    const windowSize = 10;
-    const start = Math.max(0, index - windowSize);
-    const end = Math.min(this.frequencyData.length, index + windowSize);
-    const window = this.frequencyData.slice(start, end);
+  createPillar(x, blockedLanes, width) {
+    // Create a vertical pillar spanning multiple lanes
+    // blockedLanes is an array of logical lanes like [0, 1, 2] (bottom) or [4, 5, 6] (top)
     
-    const min = Math.min(...window);
-    const max = Math.max(...window);
-    const range = max - min;
+    if (blockedLanes.length === 0) return;
     
-    if (range === 0) return 0.5;
+    // Get Y positions for all blocked lanes using the proper mapping
+    const yPositions = blockedLanes.map(lane => this.getLaneYPosition(lane));
+    const topY = Math.min(...yPositions);
+    const bottomY = Math.max(...yPositions);
     
-    return (frequency - min) / range;
-  }
-  
-  shouldCreateObstacle(frequency, index) {
-    // Create obstacles based on frequency peaks - deterministic
-    // Check if this is a local peak
-    if (index === 0 || index === this.frequencyData.length - 1) return false;
+    // Calculate pillar dimensions
+    const pillarHeight = bottomY - topY + this.laneHeight;
+    const centerY = topY + pillarHeight / 2;
     
-    const prev = this.frequencyData[index - 1];
-    const next = this.frequencyData[index + 1];
-    
-    // Calculate average of neighbors for comparison
-    const avgNeighbors = (prev + next) / 2;
-    
-    // It's a peak if it's significantly higher than neighbors (stricter threshold)
-    // Use relative comparison - peak needs to be at least 20% higher than neighbors
-    const isPeak = frequency > avgNeighbors * 1.2 && frequency > avgNeighbors + 15;
-    
-    return isPeak;
-  }
-  
-  createObstacle(x, laneIndex) {
-    // Get the exact Y position for this lane (center of lane)
-    const y = this.laneYPositions[laneIndex];
-    const obstacleWidth = 50;
-    const obstacleHeight = 40;
-    
-    // Create obstacle rectangle centered on the lane
-    const obstacle = this.scene.add.rectangle(
+    // Create pillar rectangle
+    const pillar = this.scene.add.rectangle(
       x,
-      y, // Center of the lane
-      obstacleWidth,
-      obstacleHeight,
+      centerY,
+      width,
+      pillarHeight,
       0xff0000,
       1
     );
     
     // Add a border to make it more visible
-    obstacle.setStrokeStyle(2, 0xcc0000, 1);
+    pillar.setStrokeStyle(3, 0xcc0000, 1);
     
     // Add physics
-    this.scene.physics.add.existing(obstacle, true); // true = static
+    this.scene.physics.add.existing(pillar, true); // true = static
     
-    // Store obstacle data
+    // Store ONE obstacle per pillar (not per lane)
     this.obstacles.push({
-      sprite: obstacle,
+      sprite: pillar,
       x: x,
-      y: y,
-      lane: laneIndex,
-      width: obstacleWidth,
-      height: obstacleHeight
+      y: centerY,
+      width: width,
+      height: pillarHeight,
+      isPillar: true,
+      blockedLanes: blockedLanes
     });
   }
   
@@ -209,20 +116,39 @@ export default class TerrainGenerator {
   }
   
   getTotalWidth() {
-    return this.frequencyData.length * this.segmentWidth;
+    return this.stageConfig.length;
   }
   
-  getLaneYPosition(laneIndex) {
-    return this.laneYPositions[laneIndex];
+  getLaneYPosition(logicalLane) {
+    // Map logical lanes to visual Y positions
+    // Logical lane 0 (bottom/no force) = laneYPositions[6] (bottom of screen)
+    // Logical lane 6 (top/max force) = laneYPositions[0] (top of screen)
+    const visualIndex = this.numLanes - 1 - logicalLane;
+    return this.laneYPositions[visualIndex];
   }
   
   destroy() {
+    // Clean up obstacles
     this.obstacles.forEach(obstacle => {
       if (obstacle.sprite) {
         obstacle.sprite.destroy();
       }
     });
     this.obstacles = [];
+    
+    // Clean up graphics
+    if (this.graphics) {
+      this.graphics.destroy();
+      this.graphics = null;
+    }
+    
+    // Clean up lane labels
+    this.laneLabels.forEach(label => {
+      if (label) {
+        label.destroy();
+      }
+    });
+    this.laneLabels = [];
   }
 }
 

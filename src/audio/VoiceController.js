@@ -3,11 +3,13 @@ export default class VoiceController {
     this.audioContext = null;
     this.analyser = null;
     this.microphone = null;
+    this.stream = null;
     this.isActive = false;
     this.currentPitch = 0;
     this.rawPitch = 0; // Raw captured frequency at the moment (no filtering)
     this.smoothedRawPitch = 0; // Smoothed raw pitch for display
     this.currentNote = 'do'; // default starting note
+    this.currentForce = 0; // Current force value (combines volume and amplitude)
     
     // Basic smoothing factor (0-1, higher = more smoothing)
     this.smoothingFactor = 0.7;
@@ -16,6 +18,7 @@ export default class VoiceController {
     this.minRMS = 0.01; // Minimum RMS (signal strength) to consider valid
     this.minAmplitude = 0.01; // Minimum peak amplitude
     this.minDynamicRange = 0.005; // Minimum dynamic range (to filter flat noise)
+    this.minForce = 0.03; // Minimum force threshold (combines RMS and amplitude)
     
     // Musical notes with their frequency ranges (Hz)
     // Octaves 3 and 4 - NO overlapping frequencies
@@ -44,6 +47,8 @@ export default class VoiceController {
   
   async initialize() {
     try {
+      console.log('[VoiceController] Requesting microphone access...');
+      
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -53,24 +58,32 @@ export default class VoiceController {
         } 
       });
       
+      console.log('[VoiceController] Microphone access granted');
+      
       // Create audio context
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      console.log('[VoiceController] AudioContext created, state:', this.audioContext.state);
+      
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 4096; // Higher FFT for better frequency resolution
       this.analyser.smoothingTimeConstant = 0.3; // Lower smoothing for more responsive detection
       
       // Connect microphone
       this.microphone = this.audioContext.createMediaStreamSource(stream);
+      this.stream = stream; // Store stream reference for cleanup
       this.microphone.connect(this.analyser);
+      
+      console.log('[VoiceController] Microphone connected to analyser');
       
       this.isActive = true;
       
       // Start pitch detection loop
       this.detectPitch();
       
+      console.log('[VoiceController] Initialization complete');
       return true;
     } catch (error) {
-      console.error('Error accessing microphone:', error);
+      console.error('[VoiceController] Error accessing microphone:', error);
       return false;
     }
   }
@@ -126,6 +139,12 @@ export default class VoiceController {
     detectLoop();
   }
   
+  calculateForce(rms, maxAmplitude) {
+    // Combine RMS (volume) and peak amplitude into a single force metric
+    // Weight RMS heavily (90%) as it represents sustained volume - crucial for force-based gameplay
+    return (rms * 0.9) + (maxAmplitude * 0.1);
+  }
+  
   autoCorrelate(buffer, sampleRate) {
     // Autocorrelation algorithm for pitch detection with basic noise filtering
     let size = buffer.length;
@@ -147,9 +166,13 @@ export default class VoiceController {
     }
     rms = Math.sqrt(rms / size);
     
-    // Filter out noise: signal too weak, too flat, or too quiet
-    if (rms < this.minRMS) return -1; // Too quiet
-    if (maxAmplitude < this.minAmplitude) return -1; // Too weak
+    // Calculate force (combines volume and amplitude)
+    const force = this.calculateForce(rms, maxAmplitude);
+    this.currentForce = force;
+    
+    // For force-based gameplay, we want all force levels (including 0)
+    // Only filter out actual noise with very specific checks
+    if (rms < 0.005 && maxAmplitude < 0.005) return -1; // Complete silence/noise
     if (maxAmplitude - minAmplitude < this.minDynamicRange) return -1; // Too flat (likely noise)
     
     // Find the best offset
@@ -188,6 +211,10 @@ export default class VoiceController {
   
   getRawPitch() {
     return this.rawPitch;
+  }
+  
+  getForce() {
+    return this.currentForce;
   }
   
   getCurrentNote() {
@@ -235,15 +262,70 @@ export default class VoiceController {
   }
   
   destroy() {
+    console.log('[VoiceController] Destroying voice controller...');
     this.isActive = false;
     
+    // Disconnect microphone
     if (this.microphone) {
       this.microphone.disconnect();
+      this.microphone = null;
     }
     
-    if (this.audioContext) {
-      this.audioContext.close();
+    // Stop all tracks in the stream
+    if (this.stream) {
+      console.log('[VoiceController] Stopping media stream tracks');
+      this.stream.getTracks().forEach(track => {
+        track.stop();
+        console.log('[VoiceController] Track stopped:', track.kind);
+      });
+      this.stream = null;
     }
+    
+    // Close audio context (sync version)
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      console.log('[VoiceController] Closing audio context');
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+    
+    this.analyser = null;
+    console.log('[VoiceController] Destroy complete');
+  }
+  
+  async destroyAsync() {
+    console.log('[VoiceController] Destroying voice controller async...');
+    this.isActive = false;
+    
+    // Disconnect microphone
+    if (this.microphone) {
+      this.microphone.disconnect();
+      this.microphone = null;
+    }
+    
+    // Stop all tracks in the stream
+    if (this.stream) {
+      console.log('[VoiceController] Stopping media stream tracks');
+      this.stream.getTracks().forEach(track => {
+        track.stop();
+        console.log('[VoiceController] Track stopped:', track.kind);
+      });
+      this.stream = null;
+    }
+    
+    // Close audio context and wait for it to complete
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      console.log('[VoiceController] Closing audio context (async)...');
+      try {
+        await this.audioContext.close();
+        console.log('[VoiceController] Audio context closed successfully');
+      } catch (error) {
+        console.error('[VoiceController] Error closing audio context:', error);
+      }
+      this.audioContext = null;
+    }
+    
+    this.analyser = null;
+    console.log('[VoiceController] Async destroy complete');
   }
 }
 

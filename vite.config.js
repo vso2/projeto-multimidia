@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/prototipo-multimidia/', // Change this to your GitHub repository name
+  base: '/projeto-multimidia/', // Change this to your GitHub repository name
   server: {
     port: 3000,
     open: true
