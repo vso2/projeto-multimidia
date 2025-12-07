@@ -217,6 +217,12 @@ export default class VoiceController {
     return this.currentForce;
   }
   
+  getVolume() {
+    // Return the RMS value (volume) separately for clarity
+    // This is essentially the same as force for now
+    return this.currentForce;
+  }
+  
   getCurrentNote() {
     return this.currentNote;
   }

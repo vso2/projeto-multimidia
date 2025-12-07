@@ -3,6 +3,11 @@ import TerrainGenerator from '../game/TerrainGenerator.js';
 import VoiceController from '../audio/VoiceController.js';
 import { defaultStage } from '../game/stages.js';
 
+// Import asset images
+import birdSpriteUrl from '../../assets/Pixel Art Bird 16x16/BirdSprite.png';
+import backgroundUrl from '../../assets/Tiles/Assets/Background_1.png';
+import obstaclesUrl from '../../assets/Tiles/Assets/Assets.png';
+
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -10,16 +15,15 @@ export default class GameScene extends Phaser.Scene {
     this.terrain = null;
     this.voiceController = null;
     this.audioElement = null;
-    this.scrollSpeed = 80; // pixels per second (slower for better control)
+    this.baseScrollSpeed = 80; // base pixels per second (volume adds boost)
     this.startTime = 0;
     this.isGameStarted = false;
     this.isGameOver = false;
     this.statusText = null;
-    this.forceText = null;
+    this.frequencyVolumeText = null;
     this.stageNameText = null;
     this.distanceText = null;
     this.currentStage = null;
-    this.forceThresholds = [];
     this.endText = null;
     this.restartText = null;
     this.menuButton = null;
@@ -28,10 +32,53 @@ export default class GameScene extends Phaser.Scene {
     this.modalText = null;
     this.instructionsText = null;
     this.startButton = null;
+    this.background = null; // Background sprite
+  }
+  
+  preload() {
+    console.log('[GameScene] Preloading assets...');
+    
+    // Add load event listeners for debugging BEFORE loading
+    this.load.on('filecomplete', (key, type, data) => {
+      console.log('[GameScene] Loaded:', key, type);
+    });
+    
+    this.load.on('loaderror', (file) => {
+      console.error('[GameScene] Error loading:', file.key, 'from', file.url);
+    });
+    
+    this.load.on('complete', () => {
+      console.log('[GameScene] All assets loaded!');
+    });
+    
+    // Load animated bird sprite sheet (16x16 per frame)
+    // Use imported URLs for Vite compatibility
+    this.load.spritesheet('bird', birdSpriteUrl, {
+      frameWidth: 16,
+      frameHeight: 16
+    });
+    
+    // Load sky background
+    this.load.image('background', backgroundUrl);
+    
+    // Load obstacle tileset as spritesheet (16x16 tiles)
+    this.load.spritesheet('assetTiles', obstaclesUrl, {
+      frameWidth: 16,
+      frameHeight: 16
+    });
   }
   
   create(data) {
     console.log('[GameScene] create() called');
+    
+    // Add fixed sky background
+    this.background = this.add.image(
+      400, 300, // Center of screen (800x600)
+      'background'
+    );
+    this.background.setDisplaySize(800, 600); // Fill entire screen
+    this.background.setDepth(-10); // Behind everything
+    this.background.setScrollFactor(0); // Fixed, doesn't scroll
     
     // Reset game state flags
     this.isGameStarted = false;
@@ -53,46 +100,83 @@ export default class GameScene extends Phaser.Scene {
     
     console.log('[GameScene] Loaded stage:', this.currentStage.name);
     
-    // Calculate force thresholds based on stage difficulty
-    this.calculateForceThresholds();
+    // Expand world bounds to match stage length
+    const stageLength = this.currentStage.length;
+    const gameHeight = this.game.config.height;
+    this.physics.world.setBounds(0, 0, stageLength, gameHeight);
+    console.log('[GameScene] World bounds set to:', stageLength, 'x', gameHeight);
     
-    // Create terrain with lanes and pillar obstacles from stage config
+    // Create terrain with pillar obstacles from stage config
     this.terrain = new TerrainGenerator(this, this.currentStage);
     this.terrain.generate();
     
-    // Create player starting at lane 0 (bottom - no force)
-    const startY = this.terrain.getLaneYPosition(0);
-    this.player = new Player(this, 100, startY, this.terrain);
-    this.player.setLane(0); // Start at bottom lane
+    // Create bird animations BEFORE creating player
+    // Flying animation (second row - 8 frames)
+    if (!this.anims.exists('fly')) {
+      this.anims.create({
+        key: 'fly',
+        frames: this.anims.generateFrameNumbers('bird', { 
+          start: 8,   // Second row: flying animation starts at frame 8
+          end: 15     // 8 frames for flying animation (8-15)
+        }),
+        frameRate: 8,
+        repeat: -1
+      });
+    }
     
-    // Create UI text
-    this.statusText = this.add.text(10, 10, 'Initializing voice control...', {
+    // Ground animation (first row - 2 frames)
+    if (!this.anims.exists('ground')) {
+      this.anims.create({
+        key: 'ground',
+        frames: this.anims.generateFrameNumbers('bird', { 
+          start: 6,   // First row: ground animation
+          end: 7      // 2 frames (7-8)
+        }),
+        frameRate: 4,  // Slower animation for ground
+        repeat: -1
+      });
+    }
+    
+    // Create player starting near bottom of screen
+    const startY = this.game.config.height - 100; // Start near bottom
+    this.player = new Player(this, 100, startY);
+    this.player.sprite.clearTint(); // Ensure no tint on new player
+    this.playerHit = false; // Reset collision flag
+    
+    // Create UI text - positioned on right upper side
+    const rightX = this.game.config.width - 10; // Right edge with 10px margin
+    
+    this.statusText = this.add.text(rightX, 10, 'Initializing voice control...', {
       fontSize: '16px',
       fill: '#fff',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.statusText.setOrigin(1, 0); // Right-aligned
     
-    this.stageNameText = this.add.text(10, 40, `Stage: ${this.currentStage.name}`, {
+    this.stageNameText = this.add.text(rightX, 40, `Stage: ${this.currentStage.name}`, {
       fontSize: '14px',
       fill: '#00ff00',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.stageNameText.setOrigin(1, 0); // Right-aligned
     
-    this.forceText = this.add.text(10, 70, 'Force: 0.000 | Lane: 0', {
+    this.frequencyVolumeText = this.add.text(rightX, 70, 'Frequency: 0 Hz | Volume: 0.00', {
       fontSize: '16px',
       fill: '#888888',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.frequencyVolumeText.setOrigin(1, 0); // Right-aligned
     
-    this.distanceText = this.add.text(10, 100, 'Distance: 0%', {
+    this.distanceText = this.add.text(rightX, 100, 'Distance: 0%', {
       fontSize: '14px',
       fill: '#fff',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.distanceText.setOrigin(1, 0); // Right-aligned
     
     // Set camera to follow player horizontally
     this.cameras.main.resetFX();
@@ -111,26 +195,6 @@ export default class GameScene extends Phaser.Scene {
     
     // Show modal with headphone message and start button
     this.showStartModal();
-  }
-  
-  calculateForceThresholds() {
-    // Base thresholds for force-to-lane mapping
-    const baseThresholds = [0.00, 0.02, 0.04, 0.06, 0.09, 0.12, 0.16, Infinity];
-    
-    // Apply stage difficulty multiplier
-    this.forceThresholds = baseThresholds.map(threshold => 
-      threshold === Infinity ? Infinity : threshold * this.currentStage.forceMultiplier
-    );
-  }
-  
-  getLaneFromForce(force) {
-    // Map force value to lane (0-6)
-    for (let lane = 0; lane < 7; lane++) {
-      if (force >= this.forceThresholds[lane] && force < this.forceThresholds[lane + 1]) {
-        return lane;
-      }
-    }
-    return 0; // Default to bottom lane
   }
   
   showStartModal() {
@@ -167,7 +231,7 @@ export default class GameScene extends Phaser.Scene {
     this.instructionsText = this.add.text(
       this.game.config.width / 2,
       280,
-      'Sing LOUDER to move UP to higher lanes\nStop singing to drop DOWN to bottom lane\nNavigate through pillar gaps!\nSustain your volume to maintain lane position!',
+      'Sing HIGHER pitch to fly UP!\nSing LOUDER to move FASTER forward!\nStop singing to fall DOWN!\nNavigate through pillar gaps!',
       {
         fontSize: '16px',
         fill: '#ffffff',
@@ -269,6 +333,7 @@ export default class GameScene extends Phaser.Scene {
     console.log('[GameScene] Starting game...');
     this.isGameStarted = true;
     this.isGameOver = false; // Ensure game over is false
+    this.playerHit = false; // Reset collision flag
     this.startTime = this.time.now;
     
     // Start audio playback synchronized with game
@@ -289,58 +354,86 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
     
+    // Safety check: if delta is invalid, skip this frame
+    if (!delta || delta <= 0 || !isFinite(delta) || delta > 1000) {
+      console.warn('[GameScene] Invalid delta:', delta);
+      return;
+    }
+    
+    // Background is fixed, no scrolling needed
+    
     // Make UI follow camera regardless of game state
     this.statusText.setScrollFactor(0);
     this.stageNameText.setScrollFactor(0);
-    this.forceText.setScrollFactor(0);
+    this.frequencyVolumeText.setScrollFactor(0);
     this.distanceText.setScrollFactor(0);
     
     // Don't run game logic until started
     if (!this.isGameStarted || this.isGameOver) {
-      // Debug log to see why game is paused
-      if (this.isGameOver) {
-        console.log('[GameScene] Update skipped - game is over');
-      }
-      // Still update force display even before game starts
-      if (this.voiceController && this.voiceController.isActive && this.forceText) {
-        const force = this.voiceController.getForce();
-        const currentLane = this.getLaneFromForce(force);
+      // Still update frequency/volume display even before game starts
+      if (this.voiceController && this.voiceController.isActive && this.frequencyVolumeText) {
+        const frequency = this.voiceController.getPitch();
+        const volume = this.voiceController.getVolume();
         
-        // Show force and lane
-        this.forceText.setText(`Force: ${force.toFixed(3)} | Lane: ${currentLane}`);
+        // Show frequency and volume
+        this.frequencyVolumeText.setText(`Frequency: ${Math.round(frequency)} Hz | Volume: ${volume.toFixed(2)} | Ready!`);
         
-        // Color code by lane (higher lanes = brighter colors)
-        const laneColors = ['#444444', '#666666', '#888888', '#aaaaaa', '#00ff00', '#00ffff', '#ffff00'];
-        this.forceText.setStyle({ fill: laneColors[currentLane] });
+        // Color code by frequency (higher frequency = brighter colors)
+        const normalizedFreq = Phaser.Math.Clamp((frequency - 130) / (520 - 130), 0, 1);
+        const hue = normalizedFreq * 120; // 0 = red, 120 = green
+        this.frequencyVolumeText.setStyle({ fill: `hsl(${hue}, 100%, 50%)` });
       }
       return;
     }
     
-    // Update player position based on force (volume-based lane control)
+    // Update player physics based on frequency and volume
     if (this.voiceController && this.voiceController.isActive) {
-      const force = this.voiceController.getForce();
+      const frequency = this.voiceController.getPitch();
+      const volume = this.voiceController.getVolume();
       
-      // Map force to lane
-      const targetLane = this.getLaneFromForce(force);
-      this.player.setLane(targetLane);
+      // Apply frequency-based upward force
+      this.player.applyFrequencyForce(frequency);
       
-      // Show force and current lane
-      this.forceText.setText(`Force: ${force.toFixed(3)} | Lane: ${targetLane}`);
+      // Apply volume-based horizontal boost
+      this.player.applyVolumeBoost(volume);
       
-      // Color code by lane (higher lanes = brighter colors)
-      const laneColors = ['#444444', '#666666', '#888888', '#aaaaaa', '#00ff00', '#00ffff', '#ffff00'];
-      this.forceText.setStyle({ fill: laneColors[targetLane] });
+      // Show frequency and volume
+      const boost = Math.round(this.player.getVolumeBoost());
+      const currentSpeed = Math.round(this.baseScrollSpeed + boost);
+      this.frequencyVolumeText.setText(`Frequency: ${Math.round(frequency)} Hz | Volume: ${volume.toFixed(2)} | Speed: ${currentSpeed}px/s`);
+      
+      // Color code by frequency (higher frequency = brighter colors)
+      const normalizedFreq = Phaser.Math.Clamp((frequency - 130) / (520 - 130), 0, 1);
+      const hue = normalizedFreq * 120; // 0 = red, 120 = green
+      this.frequencyVolumeText.setStyle({ fill: `hsl(${hue}, 100%, 50%)` });
+    } else {
+      // If voice controller becomes inactive, apply defaults
+      this.player.applyFrequencyForce(0);
+      this.player.applyVolumeBoost(0);
+      console.warn('[GameScene] Voice controller not active!');
     }
     
-    // Update player
-    this.player.update();
+    // Update player physics
+    this.player.update(delta);
     
-    // Auto-scroll camera
-    const elapsedTime = (time - this.startTime) / 1000; // seconds
-    const targetX = this.scrollSpeed * elapsedTime;
+    // Force player sprite to always be visible (extra safety check)
+    if (this.player && this.player.sprite) {
+      this.player.sprite.setVisible(true);
+      this.player.sprite.setActive(true);
+      this.player.sprite.setAlpha(1);
+    }
     
-    // Move player forward
-    this.player.sprite.x = 100 + targetX;
+    // Move player forward at base speed + volume boost (always move forward)
+    const volumeBoost = this.player.getVolumeBoost();
+    const currentSpeed = this.baseScrollSpeed + volumeBoost;
+    const horizontalMovement = currentSpeed * delta / 1000;
+    
+    // Debug: log if movement is suspiciously small
+    if (horizontalMovement < 0.001) {
+      console.warn('[GameScene] Very small horizontal movement:', horizontalMovement, 'delta:', delta, 'speed:', currentSpeed);
+    }
+    
+    this.player.sprite.x += horizontalMovement;
     
     // Check collision with terrain
     this.checkTerrainCollision();
@@ -357,19 +450,20 @@ export default class GameScene extends Phaser.Scene {
   }
   
   checkTerrainCollision() {
-    // Get player position and current lane
-    const playerX = this.player.sprite.x;
-    const playerLane = this.player.getCurrentLane();
-    const playerWidth = 40; // Player sprite width
+    // Don't check collision if game is already over
+    if (this.isGameOver) return;
+    
+    // Get player bounds
+    const playerBounds = this.player.getBounds();
     const checkRange = 100; // Check obstacles within this range
     
     // Get nearby obstacles
     const nearbyObstacles = this.terrain.getObstaclesInRange(
-      playerX - checkRange,
-      playerX + checkRange
+      playerBounds.x - checkRange,
+      playerBounds.x + checkRange
     );
     
-    // Check collision with pillars using lane-based detection
+    // Check collision with pillars using bounding box collision
     let hitObstacle = false;
     
     for (const obstacle of nearbyObstacles) {
@@ -378,54 +472,78 @@ export default class GameScene extends Phaser.Scene {
       // Check X-axis overlap (horizontal collision)
       const obstacleLeft = obstacle.x - obstacle.width / 2;
       const obstacleRight = obstacle.x + obstacle.width / 2;
-      const playerLeft = playerX - playerWidth / 2;
-      const playerRight = playerX + playerWidth / 2;
+      const playerLeft = playerBounds.x;
+      const playerRight = playerBounds.right;
       
       const overlapX = playerRight > obstacleLeft && playerLeft < obstacleRight;
       
-      // Check if player's lane is blocked by this pillar
-      const laneBlocked = obstacle.blockedLanes.includes(playerLane);
+      // Check Y-axis overlap (vertical collision)
+      const obstacleTop = obstacle.minY;
+      const obstacleBottom = obstacle.maxY;
+      const playerTop = playerBounds.y;
+      const playerBottom = playerBounds.bottom;
       
-      // Collision occurs only if BOTH conditions are true
-      if (overlapX && laneBlocked) {
+      const overlapY = playerBottom > obstacleTop && playerTop < obstacleBottom;
+      
+      // Collision occurs if BOTH X and Y overlap
+      if (overlapX && overlapY) {
         hitObstacle = true;
-        // Visual feedback - flash the obstacle
-        obstacle.sprite.setFillStyle(0xffff00);
+        console.log('[GameScene] Collision detected!', 'Player:', playerTop.toFixed(1), '-', playerBottom.toFixed(1), 'Obstacle:', obstacleTop, '-', obstacleBottom);
+        // Visual feedback - flash the obstacle (sprites use setTint)
+        if (obstacle.body) obstacle.body.setTint(0xffff00);
+        if (obstacle.top) obstacle.top.setTint(0xffff00);
         this.time.delayedCall(100, () => {
-          if (obstacle.sprite) obstacle.sprite.setFillStyle(0xff0000);
+          if (obstacle.body) obstacle.body.clearTint();
+          if (obstacle.top) obstacle.top.clearTint();
         });
         break;
       }
     }
     
-    // Visual feedback for player
-    if (hitObstacle) {
-      this.player.sprite.setFillStyle(0xff0000); // Red when hit
+    // Visual feedback for player - only apply once when collision is first detected
+    if (hitObstacle && !this.playerHit) {
+      this.playerHit = true; // Mark that player was hit to prevent repeated tint application
+      if (this.player && this.player.sprite && this.player.sprite.active) {
+        this.player.sprite.setTint(0xff0000); // Red tint when hit
+        // Ensure sprite stays visible even with tint
+        this.player.sprite.setVisible(true);
+        this.player.sprite.setAlpha(1);
+      }
+      console.log('[GameScene] Calling endGame(false)...');
       this.endGame(false);
-    } else {
-      this.player.sprite.setFillStyle(0x00ffff); // Cyan when safe
     }
   }
   
   endGame(success) {
-    if (this.isGameOver) return;
+    console.log('[GameScene] endGame called with success:', success, 'isGameOver:', this.isGameOver);
+    
+    if (this.isGameOver) {
+      console.log('[GameScene] Game already over, ignoring endGame call');
+      return;
+    }
     
     this.isGameOver = true;
+    console.log('[GameScene] Setting isGameOver to true');
     
     // Pause audio playback
     if (this.audioElement) {
       this.audioElement.pause();
+      console.log('[GameScene] Audio paused');
     }
     
     // Show end message
     const message = success ? 'Level Complete!' : 'Game Over!';
     const color = success ? '#00ff00' : '#ff0000';
     
+    console.log('[GameScene] Showing end modal:', message);
+    
     // Show end modal
     this.showEndModal(message, color);
   }
   
   showEndModal(message, color) {
+    console.log('[GameScene] showEndModal called with message:', message, 'color:', color);
+    
     // Create semi-transparent black overlay
     this.modalOverlay = this.add.rectangle(
       this.game.config.width / 2,
@@ -437,6 +555,7 @@ export default class GameScene extends Phaser.Scene {
     );
     this.modalOverlay.setScrollFactor(0);
     this.modalOverlay.setDepth(1000);
+    console.log('[GameScene] Modal overlay created');
     
     // Add end message
     this.endText = this.add.text(
@@ -567,6 +686,7 @@ export default class GameScene extends Phaser.Scene {
     // Reset game state
     this.isGameOver = false;
     this.isGameStarted = false;
+    this.playerHit = false; // Reset collision flag
     this.startTime = 0;
     
     // Recreate the game with same audio data
@@ -615,9 +735,9 @@ export default class GameScene extends Phaser.Scene {
       this.stageNameText.destroy();
       this.stageNameText = null;
     }
-    if (this.forceText) {
-      this.forceText.destroy();
-      this.forceText = null;
+    if (this.frequencyVolumeText) {
+      this.frequencyVolumeText.destroy();
+      this.frequencyVolumeText = null;
     }
     if (this.distanceText) {
       this.distanceText.destroy();
@@ -670,9 +790,9 @@ export default class GameScene extends Phaser.Scene {
       this.stageNameText.destroy();
       this.stageNameText = null;
     }
-    if (this.forceText) {
-      this.forceText.destroy();
-      this.forceText = null;
+    if (this.frequencyVolumeText) {
+      this.frequencyVolumeText.destroy();
+      this.frequencyVolumeText = null;
     }
     if (this.distanceText) {
       this.distanceText.destroy();
@@ -686,46 +806,66 @@ export default class GameScene extends Phaser.Scene {
   }
   
   recreate() {
-    // Recalculate force thresholds
-    this.calculateForceThresholds();
+    // Add fixed sky background
+    this.background = this.add.image(
+      400, 300, // Center of screen (800x600)
+      'background'
+    );
+    this.background.setDisplaySize(800, 600); // Fill entire screen
+    this.background.setDepth(-10); // Behind everything
+    this.background.setScrollFactor(0); // Fixed, doesn't scroll
     
-    // Create terrain with lanes and pillar obstacles from stage config
+    // Expand world bounds to match stage length
+    const stageLength = this.currentStage.length;
+    const gameHeight = this.game.config.height;
+    this.physics.world.setBounds(0, 0, stageLength, gameHeight);
+    
+    // Create terrain with pillar obstacles from stage config
     this.terrain = new TerrainGenerator(this, this.currentStage);
     this.terrain.generate();
     
-    // Create player starting at lane 0 (bottom - no force)
-    const startY = this.terrain.getLaneYPosition(0);
-    this.player = new Player(this, 100, startY, this.terrain);
-    this.player.setLane(0); // Start at bottom lane
+    // Create player starting near bottom of screen
+    const startY = this.game.config.height - 100; // Start near bottom
+    this.player = new Player(this, 100, startY);
+    this.player.sprite.clearTint(); // Ensure no tint on new player
+    this.playerHit = false; // Reset collision flag
     
-    // Create UI text
-    this.statusText = this.add.text(10, 10, 'Initializing voice control...', {
+    // Bird animation already exists from initial create, just need to ensure it's available
+    
+    // Create UI text - positioned on right upper side
+    const rightX = this.game.config.width - 10; // Right edge with 10px margin
+    
+    this.statusText = this.add.text(rightX, 10, 'Initializing voice control...', {
       fontSize: '16px',
       fill: '#fff',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.statusText.setOrigin(1, 0); // Right-aligned
     
-    this.stageNameText = this.add.text(10, 40, `Stage: ${this.currentStage.name}`, {
+    this.stageNameText = this.add.text(rightX, 40, `Stage: ${this.currentStage.name}`, {
       fontSize: '14px',
       fill: '#00ff00',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.stageNameText.setOrigin(1, 0); // Right-aligned
     
-    this.forceText = this.add.text(10, 70, 'Force: 0.000 | Lane: 0', {
+    this.frequencyVolumeText = this.add.text(rightX, 70, 'Frequency: 0 Hz | Volume: 0.00', {
       fontSize: '16px',
       fill: '#888888',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.frequencyVolumeText.setOrigin(1, 0); // Right-aligned
     
-    this.distanceText = this.add.text(10, 100, 'Distance: 0%', {
+    this.distanceText = this.add.text(rightX, 100, 'Distance: 0%', {
       fontSize: '14px',
       fill: '#fff',
       backgroundColor: '#000',
       padding: { x: 10, y: 5 }
     });
+    this.distanceText.setOrigin(1, 0); // Right-aligned
     
     // Reset camera
     this.cameras.main.resetFX();

@@ -3,111 +3,93 @@ export default class TerrainGenerator {
     this.scene = scene;
     this.stageConfig = stageConfig;
     this.obstacles = [];
-    this.laneLines = [];
-    this.graphics = null;
-    this.laneLabels = [];
-    this.numLanes = 7; // 7 lanes for force levels (0-6)
-    
-    // Calculate lane positions
-    const gameHeight = scene.game.config.height;
-    this.laneHeight = 70;
-    this.topMargin = 50;
-    
-    // Lane Y positions (top to bottom: lanes 6, 5, 4, 3, 2, 1, 0)
-    this.laneYPositions = [];
-    for (let i = 0; i < this.numLanes; i++) {
-      this.laneYPositions.push(this.topMargin + (i * this.laneHeight));
-    }
+    this.gameHeight = scene.game.config.height;
   }
   
   generate() {
-    // Draw lane dividers
-    this.drawLanes();
-    
     // Generate pillar obstacles from stage configuration
     this.generatePillars();
     
     return this.obstacles;
   }
   
-  drawLanes() {
-    this.graphics = this.scene.add.graphics();
-    this.graphics.lineStyle(1, 0x444444, 0.5);
-    this.graphics.setScrollFactor(0); // Keep lane lines fixed on screen
-    
-    const screenWidth = this.scene.game.config.width;
-    
-    // Draw horizontal lane lines
-    this.laneYPositions.forEach((y, index) => {
-      this.graphics.moveTo(0, y);
-      this.graphics.lineTo(screenWidth, y);
-      
-      // Add lane labels (6 = highest force, 0 = lowest force)
-      const laneNumber = this.numLanes - index - 1; // Reverse: top lane = 6, bottom = 0
-      const label = this.scene.add.text(5, y, `${laneNumber}`, {
-        fontSize: '14px',
-        fill: '#ffff00',
-        fontStyle: 'bold',
-        align: 'left'
-      });
-      label.setOrigin(0, 0.5); // Left aligned, vertically centered on lane
-      label.setScrollFactor(0); // Keep labels fixed on screen
-      label.setDepth(100); // Keep labels above other elements
-      this.laneLabels.push(label);
-    });
-    
-    this.graphics.strokePath();
-  }
-  
   generatePillars() {
     // Create pillar obstacles from stage configuration
     this.stageConfig.pillars.forEach(pillarConfig => {
-      this.createPillar(pillarConfig.x, pillarConfig.blockedLanes, pillarConfig.width);
+      // Convert old blockedLanes format to minY/maxY if needed
+      if (pillarConfig.blockedLanes) {
+        const { minY, maxY } = this.convertLanesToYRange(pillarConfig.blockedLanes);
+        this.createPillar(pillarConfig.x, minY, maxY, pillarConfig.width);
+      } else {
+        // New format already has minY/maxY
+        this.createPillar(pillarConfig.x, pillarConfig.minY, pillarConfig.maxY, pillarConfig.width);
+      }
     });
     
     console.log(`Generated ${this.obstacles.length} pillar obstacles for stage: ${this.stageConfig.name}`);
   }
   
-  createPillar(x, blockedLanes, width) {
-    // Create a vertical pillar spanning multiple lanes
-    // blockedLanes is an array of logical lanes like [0, 1, 2] (bottom) or [4, 5, 6] (top)
+  convertLanesToYRange(blockedLanes) {
+    // Convert old lane-based format to Y-coordinates
+    // Pillars should extend from the BOTTOM of screen upward
+    // Lane 0 (bottom) = ~520px, Lane 6 (top) = ~50px
+    // Each lane is ~70px apart
+    const laneHeight = 70;
+    const topMargin = 50;
     
-    if (blockedLanes.length === 0) return;
+    // Find the highest blocked lane to determine how tall the pillar should be
+    const maxBlockedLane = Math.max(...blockedLanes);
     
-    // Get Y positions for all blocked lanes using the proper mapping
-    const yPositions = blockedLanes.map(lane => this.getLaneYPosition(lane));
-    const topY = Math.min(...yPositions);
-    const bottomY = Math.max(...yPositions);
+    // Map the highest lane to Y position (this is the TOP of the pillar)
+    const visualIndex = 6 - maxBlockedLane;
+    const minY = topMargin + (visualIndex * laneHeight);
     
-    // Calculate pillar dimensions
-    const pillarHeight = bottomY - topY + this.laneHeight;
-    const centerY = topY + pillarHeight / 2;
+    // Pillar extends from top of highest lane to bottom of screen
+    const maxY = this.gameHeight;
     
-    // Create pillar rectangle
-    const pillar = this.scene.add.rectangle(
+    return { minY, maxY };
+  }
+  
+  createPillar(x, minY, maxY, width) {
+    // Create a vertical pillar spanning a Y-range using tiles from Assets.png
+    const pillarHeight = maxY - minY;
+    
+    // Use specific frame numbers from Assets.png
+    const topFrame = 3;    // Frame 3 for top cap (Row 1, Col 1)
+    const bodyFrame = 33;   // Frame 33 for body (Row 2, Col 1)
+    
+    // Create body with repeating tile (leaves 16px at top for cap)
+    const bodyHeight = pillarHeight - 16;
+    const bodyCenterY = minY + 16 + (bodyHeight / 2);
+    const body = this.scene.add.tileSprite(
       x,
-      centerY,
+      bodyCenterY,
       width,
-      pillarHeight,
-      0xff0000,
-      1
+      bodyHeight,
+      'assetTiles'
     );
+    body.setFrame(bodyFrame); // Set to body tile (row 2, col 1)
     
-    // Add a border to make it more visible
-    pillar.setStrokeStyle(3, 0xcc0000, 1);
+    // Create top cap (single sprite at the top)
+    const topCenterY = minY + 8; // Center of 16px tall top piece
+    const top = this.scene.add.sprite(x, topCenterY, 'assetTiles', topFrame);
+    top.setDisplaySize(width, 16); // Scale to match pillar width
     
-    // Add physics
-    this.scene.physics.add.existing(pillar, true); // true = static
+    // Add physics to body (main collision object)
+    this.scene.physics.add.existing(body, true); // true = static
     
-    // Store ONE obstacle per pillar (not per lane)
+    // Store obstacle with both body and top sprites
     this.obstacles.push({
-      sprite: pillar,
+      body: body,
+      top: top,
+      sprite: body, // For backward compatibility with collision code
       x: x,
-      y: centerY,
+      y: bodyCenterY,
       width: width,
       height: pillarHeight,
-      isPillar: true,
-      blockedLanes: blockedLanes
+      minY: minY,
+      maxY: maxY,
+      isPillar: true
     });
   }
   
@@ -119,36 +101,20 @@ export default class TerrainGenerator {
     return this.stageConfig.length;
   }
   
-  getLaneYPosition(logicalLane) {
-    // Map logical lanes to visual Y positions
-    // Logical lane 0 (bottom/no force) = laneYPositions[6] (bottom of screen)
-    // Logical lane 6 (top/max force) = laneYPositions[0] (top of screen)
-    const visualIndex = this.numLanes - 1 - logicalLane;
-    return this.laneYPositions[visualIndex];
-  }
-  
   destroy() {
-    // Clean up obstacles
+    // Clean up obstacles (both body and top sprites)
     this.obstacles.forEach(obstacle => {
-      if (obstacle.sprite) {
+      if (obstacle.body) {
+        obstacle.body.destroy();
+      }
+      if (obstacle.top) {
+        obstacle.top.destroy();
+      }
+      if (obstacle.sprite && obstacle.sprite !== obstacle.body) {
         obstacle.sprite.destroy();
       }
     });
     this.obstacles = [];
-    
-    // Clean up graphics
-    if (this.graphics) {
-      this.graphics.destroy();
-      this.graphics = null;
-    }
-    
-    // Clean up lane labels
-    this.laneLabels.forEach(label => {
-      if (label) {
-        label.destroy();
-      }
-    });
-    this.laneLabels = [];
   }
 }
 
