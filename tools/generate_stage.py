@@ -249,13 +249,12 @@ class StageGenerator:
         print(f"✓ JSON file created: {output_file}")
         return output_file
     
-    def export_to_js(self, config, json_path, output_file=None):
+    def export_to_js(self, config, output_file=None):
         """
-        Export stage config to JavaScript module format that imports the JSON.
+        Export stage config to JavaScript module format with inline data.
         
         Args:
             config: Stage configuration dictionary
-            json_path: Path to the JSON file (for reference in comments)
             output_file: Output file path (optional)
             
         Returns:
@@ -381,11 +380,11 @@ def main():
     
     config = generator.generate_stage_config(args.audio_file, args.name)
     
-    # Export to JSON first (clean data format)
+    # Export to JSON first (clean data format for reference)
     json_path = generator.export_to_json(config, args.output if args.output and args.output.endswith('.json') else None)
     
     # Export to JS module (for importing in game)
-    js_path = generator.export_to_js(config, json_path, args.output if args.output and args.output.endswith('.js') else None)
+    js_path = generator.export_to_js(config, args.output if args.output and args.output.endswith('.js') else None)
     
     # Print summary
     print(f"\n{'='*80}")

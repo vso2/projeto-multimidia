@@ -6,7 +6,6 @@ export default class StageSelectScene extends Phaser.Scene {
   }
   
   create() {
-    // Add title
     const title = this.add.text(
       this.game.config.width / 2,
       80,
@@ -21,16 +20,13 @@ export default class StageSelectScene extends Phaser.Scene {
     );
     title.setOrigin(0.5);
     
-    // Convert stages object to array for easy iteration
     const stageEntries = Object.entries(stages);
     const startY = 200;
     const spacing = 120;
     
-    // Create a button for each stage
     stageEntries.forEach(([key, stage], index) => {
       const yPos = startY + (index * spacing);
       
-      // Create button background
       const button = this.add.rectangle(
         this.game.config.width / 2,
         yPos,
@@ -40,7 +36,6 @@ export default class StageSelectScene extends Phaser.Scene {
       );
       button.setInteractive({ useHandCursor: true });
       
-      // Stage name
       const stageName = this.add.text(
         this.game.config.width / 2,
         yPos - 20,
@@ -53,7 +48,6 @@ export default class StageSelectScene extends Phaser.Scene {
       );
       stageName.setOrigin(0.5);
       
-      // Stage info (duration and tempo)
       const minutes = Math.floor(stage.duration / 60);
       const seconds = Math.floor(stage.duration % 60);
       const infoText = `${minutes}:${seconds.toString().padStart(2, '0')} • ${stage.bpm.toFixed(0)} BPM • ${stage.pillars.length} Obstacles`;
@@ -69,7 +63,6 @@ export default class StageSelectScene extends Phaser.Scene {
       );
       stageInfo.setOrigin(0.5);
       
-      // Hover effects
       button.on('pointerover', () => {
         button.setFillStyle(0x0088ff);
         stageName.setStyle({ fill: '#ffff00' });
@@ -80,13 +73,11 @@ export default class StageSelectScene extends Phaser.Scene {
         stageName.setStyle({ fill: '#ffffff' });
       });
       
-      // Click to start game with selected stage
       button.on('pointerdown', () => {
         this.scene.start('GameScene', { selectedStage: stage });
       });
     });
     
-    // Add instructions at bottom
     const instructions = this.add.text(
       this.game.config.width / 2,
       this.game.config.height - 30,

@@ -2,7 +2,6 @@ import Phaser from 'phaser';
 import StageSelectScene from './scenes/StageSelectScene.js';
 import GameScene from './scenes/GameScene.js';
 
-// Initialize game with stage selection menu
 const config = {
   type: Phaser.AUTO,
   width: 800,
