@@ -37,15 +37,15 @@ export default class Player {
     this.sprite.setAlpha(1);
     
     // Physics constants
-    this.gravity = 600; // pixels/s² downward
-    this.maxUpwardVelocity = 800; // max upward speed
-    this.maxDownwardVelocity = 800; // max downward speed
+    this.gravity = 500; // pixels/s² downward
+    this.maxUpwardVelocity = 600; // max upward speed
+    this.maxDownwardVelocity = 600; // max downward speed
     
     // Frequency-based force
     this.smoothedFrequency = 0; // Smoothed frequency to prevent jitter
-    this.frequencySmoothingFactor = 0.85; // Higher = more smoothing
-    this.minFrequency = 130; // Hz
-    this.maxFrequency = 520; // Hz
+    this.frequencySmoothingFactor = 0.95; // Higher = more smoothing
+    this.minFrequency = 100; // Hz
+    this.maxFrequency = 600; // Hz
     
     // Volume-based horizontal boost
     this.volumeBoost = 0; // Current boost from volume (0-500 px/s)
@@ -125,10 +125,8 @@ export default class Player {
       frequency = 0;
     }
     
-    // Smooth the frequency input to prevent micro-oscillations
     if (frequency > 0) {
-      this.smoothedFrequency = this.smoothedFrequency * this.frequencySmoothingFactor + 
-                                frequency * (1 - this.frequencySmoothingFactor);
+      this.smoothedFrequency = this.smoothedFrequency * this.frequencySmoothingFactor + frequency * (1 - this.frequencySmoothingFactor);
     } else {
       // Decay smoothed frequency when no input
       this.smoothedFrequency *= 0.95;
@@ -137,27 +135,15 @@ export default class Player {
       }
     }
     
-    // Map smoothed frequency to upward velocity
-    // Frequency range: 130-520 Hz -> Upward velocity: 0-800 pixels/s
     
     if (this.smoothedFrequency >= this.minFrequency) {
       // Normalize frequency to 0-1 range
-      const normalizedFreq = Phaser.Math.Clamp(
-        (this.smoothedFrequency - this.minFrequency) / (this.maxFrequency - this.minFrequency),
-        0,
-        1
-      );
+      const normalizedFreq = Phaser.Math.Clamp((this.smoothedFrequency - this.minFrequency) / (this.maxFrequency - this.minFrequency),0,1);
       
-      // Apply exponential mapping for better control (feels more natural)
-      const exponentialFactor = Math.pow(normalizedFreq, 1.5);
-      const upwardVelocity = exponentialFactor * this.maxUpwardVelocity;
+      const upwardVelocity = normalizedFreq * this.maxUpwardVelocity;
       
-      // Set upward velocity (negative Y = upward in Phaser)
-      // This fights against gravity
       this.sprite.body.setVelocityY(-upwardVelocity);
     }
-    // When frequency is 0 or below threshold, don't touch velocity
-    // Let gravity naturally pull the player down
   }
   
   applyVolumeBoost(volume) {
@@ -169,17 +155,10 @@ export default class Player {
     // Clamp volume to valid range
     volume = Phaser.Math.Clamp(volume, 0, 1);
     
-    // Map volume (0-1) to horizontal boost (0-500 px/s) using exponential function
-    // Since microphone volumes are typically low (0.05-0.3), we amplify them first
-    // Then apply exponential curve for dramatic speed increase at higher volumes
-    const amplifiedVolume = Math.min(volume * 2.5, 1.0); // Amplify typical volumes
     
-    // Exponential factor: amplifiedVolume^1.3 creates responsive acceleration curve
-    // Volume 0.1 → amplified 0.25 → ~30 px/s boost
-    // Volume 0.2 → amplified 0.5 → ~150 px/s boost
-    // Volume 0.3 → amplified 0.75 → ~350 px/s boost
-    // Volume 0.4+ → amplified 1.0 → 500 px/s boost
-    const exponentialFactor = Math.pow(amplifiedVolume, 1.3);
+    const amplifiedVolume = Math.min(volume * 3, 1.0);
+    
+    const exponentialFactor = Math.pow(amplifiedVolume, 1.5);
     this.volumeBoost = exponentialFactor * this.maxVolumeBoost;
   }
   

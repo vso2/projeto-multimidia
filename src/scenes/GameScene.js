@@ -27,7 +27,6 @@ export default class GameScene extends Phaser.Scene {
     this.endText = null;
     this.restartText = null;
     this.menuButton = null;
-    this.audioData = null; // Store audio data for restart
     this.modalOverlay = null;
     this.modalText = null;
     this.instructionsText = null;
@@ -304,7 +303,7 @@ export default class GameScene extends Phaser.Scene {
       // Ensure any previous voice controller is destroyed
       if (this.voiceController) {
         console.log('[GameScene] Cleaning up previous voice controller');
-        this.voiceController.destroy();
+        await this.voiceController.destroyAsync();
         this.voiceController = null;
         // Wait a bit for cleanup to complete
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -379,7 +378,7 @@ export default class GameScene extends Phaser.Scene {
         this.frequencyVolumeText.setText(`Frequency: ${Math.round(frequency)} Hz | Volume: ${volume.toFixed(2)} | Ready!`);
         
         // Color code by frequency (higher frequency = brighter colors)
-        const normalizedFreq = Phaser.Math.Clamp((frequency - 130) / (520 - 130), 0, 1);
+        const normalizedFreq = Phaser.Math.Clamp((frequency - 100) / (600 - 100), 0, 1);
         const hue = normalizedFreq * 120; // 0 = red, 120 = green
         this.frequencyVolumeText.setStyle({ fill: `hsl(${hue}, 100%, 50%)` });
       }
@@ -403,7 +402,7 @@ export default class GameScene extends Phaser.Scene {
       this.frequencyVolumeText.setText(`Frequency: ${Math.round(frequency)} Hz | Volume: ${volume.toFixed(2)} | Speed: ${currentSpeed}px/s`);
       
       // Color code by frequency (higher frequency = brighter colors)
-      const normalizedFreq = Phaser.Math.Clamp((frequency - 130) / (520 - 130), 0, 1);
+      const normalizedFreq = Phaser.Math.Clamp((frequency - 100) / (600 - 100), 0, 1);
       const hue = normalizedFreq * 120; // 0 = red, 120 = green
       this.frequencyVolumeText.setStyle({ fill: `hsl(${hue}, 100%, 50%)` });
     } else {
@@ -416,22 +415,10 @@ export default class GameScene extends Phaser.Scene {
     // Update player physics
     this.player.update(delta);
     
-    // Force player sprite to always be visible (extra safety check)
-    if (this.player && this.player.sprite) {
-      this.player.sprite.setVisible(true);
-      this.player.sprite.setActive(true);
-      this.player.sprite.setAlpha(1);
-    }
-    
     // Move player forward at base speed + volume boost (always move forward)
     const volumeBoost = this.player.getVolumeBoost();
     const currentSpeed = this.baseScrollSpeed + volumeBoost;
     const horizontalMovement = currentSpeed * delta / 1000;
-    
-    // Debug: log if movement is suspiciously small
-    if (horizontalMovement < 0.001) {
-      console.warn('[GameScene] Very small horizontal movement:', horizontalMovement, 'delta:', delta, 'speed:', currentSpeed);
-    }
     
     this.player.sprite.x += horizontalMovement;
     
@@ -488,14 +475,6 @@ export default class GameScene extends Phaser.Scene {
       // Collision occurs if BOTH X and Y overlap
       if (overlapX && overlapY) {
         hitObstacle = true;
-        console.log('[GameScene] Collision detected!', 'Player:', playerTop.toFixed(1), '-', playerBottom.toFixed(1), 'Obstacle:', obstacleTop, '-', obstacleBottom);
-        // Visual feedback - flash the obstacle (sprites use setTint)
-        if (obstacle.body) obstacle.body.setTint(0xffff00);
-        if (obstacle.top) obstacle.top.setTint(0xffff00);
-        this.time.delayedCall(100, () => {
-          if (obstacle.body) obstacle.body.clearTint();
-          if (obstacle.top) obstacle.top.clearTint();
-        });
         break;
       }
     }
@@ -503,27 +482,16 @@ export default class GameScene extends Phaser.Scene {
     // Visual feedback for player - only apply once when collision is first detected
     if (hitObstacle && !this.playerHit) {
       this.playerHit = true; // Mark that player was hit to prevent repeated tint application
-      if (this.player && this.player.sprite && this.player.sprite.active) {
-        this.player.sprite.setTint(0xff0000); // Red tint when hit
-        // Ensure sprite stays visible even with tint
-        this.player.sprite.setVisible(true);
-        this.player.sprite.setAlpha(1);
-      }
-      console.log('[GameScene] Calling endGame(false)...');
       this.endGame(false);
     }
   }
   
   endGame(success) {
-    console.log('[GameScene] endGame called with success:', success, 'isGameOver:', this.isGameOver);
-    
     if (this.isGameOver) {
-      console.log('[GameScene] Game already over, ignoring endGame call');
       return;
     }
     
     this.isGameOver = true;
-    console.log('[GameScene] Setting isGameOver to true');
     
     // Pause audio playback
     if (this.audioElement) {
@@ -534,8 +502,6 @@ export default class GameScene extends Phaser.Scene {
     // Show end message
     const message = success ? 'Level Complete!' : 'Game Over!';
     const color = success ? '#00ff00' : '#ff0000';
-    
-    console.log('[GameScene] Showing end modal:', message);
     
     // Show end modal
     this.showEndModal(message, color);
@@ -663,97 +629,31 @@ export default class GameScene extends Phaser.Scene {
   }
   
   async backToMenu() {
-    console.log('[GameScene] Going back to menu...');
-    console.log('[GameScene] Current state - isGameStarted:', this.isGameStarted, 'isGameOver:', this.isGameOver);
-    
     // Clean up current game (will be async)
     await this.cleanupAsync();
     
     // Wait a bit more to ensure everything is cleaned up
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    console.log('[GameScene] Cleanup complete, switching to menu...');
-    
     // Stop this scene and start menu scene
     this.scene.stop('GameScene');
     this.scene.start('StageSelectScene');
   }
   
-  restartGame() {
-    // Clean up current game
-    this.cleanup();
+  async restartGame() {
+    // Clean up current game resources
+    await this.cleanupAsync();
     
-    // Reset game state
-    this.isGameOver = false;
-    this.isGameStarted = false;
-    this.playerHit = false; // Reset collision flag
-    this.startTime = 0;
+    // Wait a bit for cleanup to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Recreate the game with same audio data
-    this.recreate();
-  }
-  
-  cleanup() {
-    console.log('[GameScene] cleanup() called');
-    
-    // Clean up voice controller
-    if (this.voiceController) {
-      console.log('[GameScene] Destroying voice controller');
-      this.voiceController.destroy();
-      this.voiceController = null;
-    }
-    
-    // Clean up audio
-    if (this.audioElement) {
-      this.audioElement.pause();
-      this.audioElement.currentTime = 0;
-      this.audioElement = null;
-    }
-    
-    // Clean up modal elements
-    this.hideStartModal();
-    this.hideEndModal();
-    
-    // Clean up terrain
-    if (this.terrain) {
-      this.terrain.destroy();
-      this.terrain = null;
-    }
-    
-    // Clean up player
-    if (this.player) {
-      this.player.destroy();
-      this.player = null;
-    }
-    
-    // Clean up UI text
-    if (this.statusText) {
-      this.statusText.destroy();
-      this.statusText = null;
-    }
-    if (this.stageNameText) {
-      this.stageNameText.destroy();
-      this.stageNameText = null;
-    }
-    if (this.frequencyVolumeText) {
-      this.frequencyVolumeText.destroy();
-      this.frequencyVolumeText = null;
-    }
-    if (this.distanceText) {
-      this.distanceText.destroy();
-      this.distanceText = null;
-    }
-    
-    // Clear all game objects
-    this.children.removeAll();
+    // Restart scene (Phaser will call create() automatically)
+    this.scene.restart({ selectedStage: this.currentStage });
   }
   
   async cleanupAsync() {
-    console.log('[GameScene] cleanupAsync() called');
-    
     // Clean up voice controller and wait for AudioContext to close
     if (this.voiceController) {
-      console.log('[GameScene] Destroying voice controller async');
       await this.voiceController.destroyAsync();
       this.voiceController = null;
     }
@@ -802,94 +702,12 @@ export default class GameScene extends Phaser.Scene {
     // Clear all game objects
     this.children.removeAll();
     
-    console.log('[GameScene] cleanupAsync() complete');
   }
   
-  recreate() {
-    // Add fixed sky background
-    this.background = this.add.image(
-      400, 300, // Center of screen (800x600)
-      'background'
-    );
-    this.background.setDisplaySize(800, 600); // Fill entire screen
-    this.background.setDepth(-10); // Behind everything
-    this.background.setScrollFactor(0); // Fixed, doesn't scroll
-    
-    // Expand world bounds to match stage length
-    const stageLength = this.currentStage.length;
-    const gameHeight = this.game.config.height;
-    this.physics.world.setBounds(0, 0, stageLength, gameHeight);
-    
-    // Create terrain with pillar obstacles from stage config
-    this.terrain = new TerrainGenerator(this, this.currentStage);
-    this.terrain.generate();
-    
-    // Create player starting near bottom of screen
-    const startY = this.game.config.height - 100; // Start near bottom
-    this.player = new Player(this, 100, startY);
-    this.player.sprite.clearTint(); // Ensure no tint on new player
-    this.playerHit = false; // Reset collision flag
-    
-    // Bird animation already exists from initial create, just need to ensure it's available
-    
-    // Create UI text - positioned on right upper side
-    const rightX = this.game.config.width - 10; // Right edge with 10px margin
-    
-    this.statusText = this.add.text(rightX, 10, 'Initializing voice control...', {
-      fontSize: '16px',
-      fill: '#fff',
-      backgroundColor: '#000',
-      padding: { x: 10, y: 5 }
-    });
-    this.statusText.setOrigin(1, 0); // Right-aligned
-    
-    this.stageNameText = this.add.text(rightX, 40, `Stage: ${this.currentStage.name}`, {
-      fontSize: '14px',
-      fill: '#00ff00',
-      backgroundColor: '#000',
-      padding: { x: 10, y: 5 }
-    });
-    this.stageNameText.setOrigin(1, 0); // Right-aligned
-    
-    this.frequencyVolumeText = this.add.text(rightX, 70, 'Frequency: 0 Hz | Volume: 0.00', {
-      fontSize: '16px',
-      fill: '#888888',
-      backgroundColor: '#000',
-      padding: { x: 10, y: 5 }
-    });
-    this.frequencyVolumeText.setOrigin(1, 0); // Right-aligned
-    
-    this.distanceText = this.add.text(rightX, 100, 'Distance: 0%', {
-      fontSize: '14px',
-      fill: '#fff',
-      backgroundColor: '#000',
-      padding: { x: 10, y: 5 }
-    });
-    this.distanceText.setOrigin(1, 0); // Right-aligned
-    
-    // Reset camera
-    this.cameras.main.resetFX();
-    this.cameras.main.startFollow(this.player.sprite, false, 1, 0);
-    this.cameras.main.setFollowOffset(-300, 0);
-    this.cameras.main.setScroll(0, 0);
-    
-    // Initialize voice controller
-    this.initVoiceControl();
-    
-    // Recreate audio element
-    if (this.currentStage.audioFile) {
-      this.audioElement = new Audio(this.currentStage.audioFile);
-      this.audioElement.volume = 0.4; // Set to 40% volume
-    }
-    
-    // Show modal with headphone message and start button
-    this.showStartModal();
-  }
-  
-  shutdown() {
+  async shutdown() {
     // Clean up
     if (this.voiceController) {
-      this.voiceController.destroy();
+      await this.voiceController.destroyAsync();
     }
     
     // Clean up audio
