@@ -7,21 +7,16 @@ export default class TerrainGenerator {
   }
   
   generate() {
-    // Generate pillar obstacles from stage configuration
     this.generatePillars();
-    
     return this.obstacles;
   }
   
   generatePillars() {
-    // Create pillar obstacles from stage configuration
     this.stageConfig.pillars.forEach(pillarConfig => {
-      // Convert old blockedLanes format to minY/maxY if needed
       if (pillarConfig.blockedLanes) {
         const { minY, maxY } = this.convertLanesToYRange(pillarConfig.blockedLanes);
         this.createPillar(pillarConfig.x, minY, maxY, pillarConfig.width);
       } else {
-        // New format already has minY/maxY
         this.createPillar(pillarConfig.x, pillarConfig.minY, pillarConfig.maxY, pillarConfig.width);
       }
     });
@@ -30,58 +25,43 @@ export default class TerrainGenerator {
   }
   
   convertLanesToYRange(blockedLanes) {
-    // Convert old lane-based format to Y-coordinates
-    // Lane 0 (bottom) = ~520px, Lane 6 (top) = ~50px
-    // Each lane is ~70px apart
     const laneHeight = 70;
     const topMargin = 50;
     
-    const minLane = Math.min(...blockedLanes);  // Lowest lane number
-    const maxLane = Math.max(...blockedLanes);  // Highest lane number
+    const minLane = Math.min(...blockedLanes);
+    const maxLane = Math.max(...blockedLanes);
     
-    // Detect if this is a bottom pillar or top pillar
-    // If pillar blocks lane 0 (bottom lane), it's a bottom pillar (extends from floor upward)
-    // Otherwise, it's a top pillar (extends from ceiling downward)
     const isBottomPillar = blockedLanes.includes(0);
     
     if (isBottomPillar) {
-      // BOTTOM PILLAR: Extends from floor upward
       const visualIndex = 6 - maxLane;
       const minY = topMargin + (visualIndex * laneHeight);
-      const maxY = this.gameHeight;  // Extends to floor (600px)
+      const maxY = this.gameHeight;
       return { minY, maxY };
     } else {
-      // TOP PILLAR: Extends from ceiling downward
       const visualIndex = 6 - minLane;
-      const minY = 0;  // Starts at ceiling
+      const minY = 0;
       const maxY = topMargin + ((visualIndex + 1) * laneHeight);
       return { minY, maxY };
     }
   }
   
   createPillar(x, minY, maxY, width) {
-    // Create a vertical pillar spanning a Y-range using tiles from Assets.png
     const pillarHeight = maxY - minY;
-    
-    // Detect if this is a top pillar (starts at ceiling) or bottom pillar (ends at floor)
     const isTopPillar = minY === 0;
     
-    // Use specific frame numbers from Assets.png
-    const topFrame = 3;    // Frame 3 for top cap (Row 1, Col 1)
-    const bodyFrame = 33;   // Frame 33 for body (Row 2, Col 1)
+    const topFrame = 3;
+    const bodyFrame = 33;
     
-    // Create body with repeating tile (leaves 16px for cap)
     const bodyHeight = pillarHeight - 16;
     let bodyCenterY, capCenterY;
     
     if (isTopPillar) {
-      // TOP PILLAR: Cap goes at the bottom (where pillar ends)
       bodyCenterY = minY + (bodyHeight / 2);
-      capCenterY = maxY - 8; // Center of 16px tall cap at bottom
+      capCenterY = maxY - 8;
     } else {
-      // BOTTOM PILLAR: Cap goes at the top (where pillar starts)
       bodyCenterY = minY + 16 + (bodyHeight / 2);
-      capCenterY = minY + 8; // Center of 16px tall cap at top
+      capCenterY = minY + 8;
     }
     
     const body = this.scene.add.tileSprite(
@@ -91,25 +71,21 @@ export default class TerrainGenerator {
       bodyHeight,
       'assetTiles'
     );
-    body.setFrame(bodyFrame); // Set to body tile (row 2, col 1)
+    body.setFrame(bodyFrame);
     
-    // Create cap sprite (leaf sprite) at appropriate position
     const top = this.scene.add.sprite(x, capCenterY, 'assetTiles', topFrame);
-    top.setDisplaySize(width, 16); // Scale to match pillar width
+    top.setDisplaySize(width, 16);
     
-    // Rotate the cap 180 degrees if it's a top pillar (so it appears upside down at the bottom)
     if (isTopPillar) {
-      top.setRotation(Math.PI); // 180 degrees in radians
+      top.setRotation(Math.PI);
     }
     
-    // Add physics to body (main collision object)
-    this.scene.physics.add.existing(body, true); // true = static
+    this.scene.physics.add.existing(body, true);
     
-    // Store obstacle with both body and top sprites
     this.obstacles.push({
       body: body,
       top: top,
-      sprite: body, // For backward compatibility with collision code
+      sprite: body,
       x: x,
       y: bodyCenterY,
       width: width,
@@ -129,7 +105,6 @@ export default class TerrainGenerator {
   }
   
   destroy() {
-    // Clean up obstacles (both body and top sprites)
     this.obstacles.forEach(obstacle => {
       if (obstacle.body) {
         obstacle.body.destroy();
